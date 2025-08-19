@@ -7,9 +7,9 @@ from typing import List, Tuple, Optional
 
 from app.location_weather import fetch_weather_for_location, get_weather
 from app.user_location import get_user_location
-from app.fertilizer_api import get_fertilizer_recommendation
-from app.crop_health_api import get_crop_health
-from app.pest_api import detect_pests
+from app.fertilizer_services import get_fertilizer_recommendation
+#from app.crop_health_api import get_crop_health
+#from app.pest_api import detect_pests
 
 # Load translation
 translator = Translator()
@@ -18,7 +18,10 @@ translator = Translator()
 nlp_en = spacy.load("en_core_web_sm")
 
 # Load multilingual zero-shot classifier
-classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+classifier = pipeline(
+    "zero-shot-classification",
+    model="valhalla/distilbart-mnli-12-1"   # ~300MB, much lighter
+)
 
 # Define chatbot intents
 INTENTS = [
@@ -142,8 +145,9 @@ def generate_reply(intent: str,
         if not crop:
             return "Please specify your crop so I can suggest fertilizers."
         if lat is not None and lon is not None:
+            # Call new integrated fertilizer API
             return get_fertilizer_recommendation(crop, lat, lon)
-        return f"Fertilizer recommendation: I need your location to provide accurate advice for {crop}."
+        return f"Fertilizer recommendation: I need your farm location (lat/lon) to provide accurate advice for {crop}."
 
     # ---------- Crop Health ----------
     if intent == "crop health":
