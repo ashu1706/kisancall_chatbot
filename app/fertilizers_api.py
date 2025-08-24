@@ -1,6 +1,7 @@
 # fertilizers_api.py
 import requests
 import os
+import time
 
 # Example: AgroMonitoring API base URL (you can replace with Farmonaut or Agrio later)
 AGROMONITORING_API_KEY = os.getenv("AGROMONITORING_API_KEY", "e4d776f415123cdeb26e752235fdf5e2")
@@ -10,7 +11,13 @@ def get_field_health(polygon_id: str):
     """
     Fetch NDVI and crop health data for a given field polygon.
     """
-    url = f"{AGROMONITORING_BASE_URL}/ndvi?polyid={polygon_id}&appid={AGROMONITORING_API_KEY}"
+    end_time = int(time.time())  # now
+    start_time = end_time - (10 * 24 * 60 * 60)  # last 10 days
+
+    url = (
+        f"{AGROMONITORING_BASE_URL}/ndvi?"
+        f"polyid={polygon_id}&start={start_time}&end={end_time}&appid={AGROMONITORING_API_KEY}"
+    )
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
@@ -50,6 +57,7 @@ def recommend_fertilizer(ndvi_value: float, soil_moisture: float):
     - Low NDVI & Low Soil Moisture → NPK boost
     - Low NDVI & Good Soil Moisture → Nitrogen boost
     - High NDVI & Low Soil Moisture → Potassium for stress resistance
+
     """
     if ndvi_value < 0.3 and soil_moisture < 0.2:
         return "Apply balanced NPK fertilizer (20:20:20) to improve crop growth."

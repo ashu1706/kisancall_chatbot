@@ -1,23 +1,35 @@
 from app.fertilizers_api import get_field_health, get_soil_moisture, recommend_fertilizer
+from app.user_polygons import get_polygon
 
-# Temporary polygon_id (replace with real one after creating polygon on AgroMonitoring API)
-TEST_POLYGON_ID = "65d5e887d4e9ba0007e96e2f"
-
-def get_fertilizer_recommendation(crop: str, lat: float, lon: float) -> str:
+def get_fertilizer_recommendation(user_id: str, crop: str, lat: float, lon: float) -> str:
     """
     Fetch field data (NDVI + soil moisture) and return fertilizer recommendation.
     """
     try:
-        ndvi_data = get_field_health(TEST_POLYGON_ID)
-        soil_data = get_soil_moisture(TEST_POLYGON_ID)
+        polygon_id = get_polygon(user_id)
+        if not polygon_id:
+            return "⚠️ No farm polygon linked for this user. Please register your farm first."
 
-        if ndvi_data["status"] != "success" or soil_data["status"] != "success":
-            return "❌ Could not fetch satellite data for your farm. Please try again later."
+        # Fetch NDVI & soil data
+        ndvi_resp = get_field_health(polygon_id)
+        soil_resp = get_soil_moisture(polygon_id)
 
-        # Extract values
-        ndvi_value = ndvi_data["data"][-1]["mean"] if ndvi_data["data"] else 0.4
-        soil_moisture = soil_data["data"].get("moisture", 0.3)
+        if ndvi_resp["status"] != "success" or soil_resp["status"] != "success":
+            return "Could not fetch satellite data for your farm. Please try again later."
 
+        # NDVI → take last scene if available
+        ndvi_list = ndvi_resp["data"]
+        if isinstance(ndvi_list, list) and len(ndvi_list) > 0:
+
+            ndvi_value = ndvi_list[-1]["data"].get("mean", 0.4)
+        else:
+            ndvi_value = 0.4  # fallback
+
+        # Soil moisture
+        soil_data = soil_resp["data"]
+        soil_moisture = soil_data.get("moisture", 0.3) if isinstance(soil_data, dict) else 0.3
+
+        # Get recommendation
         recommendation = recommend_fertilizer(ndvi_value, soil_moisture)
 
         return (
@@ -26,5 +38,6 @@ def get_fertilizer_recommendation(crop: str, lat: float, lon: float) -> str:
             f"- Soil Moisture: {soil_moisture:.2f}\n\n"
             f"💡 {recommendation}"
         )
+
     except Exception as e:
         return f"⚠️ Error while generating fertilizer recommendation: {str(e)}"
