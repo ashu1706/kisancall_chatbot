@@ -21,26 +21,60 @@ def get_coordinates(location_name: str) -> Tuple[float, float] | Tuple[None, Non
         print(f"Geocoding error: {e}")
     return None, None
 
+
 def get_weather(latitude: float, longitude: float) -> Dict[str, Any]:
-    """Fetch current weather for given coordinates (Open-Meteo)."""
+    """Fetch current & recent weather for given coordinates (Open-Meteo)."""
     try:
         params = {
             "latitude": latitude,
             "longitude": longitude,
             "current_weather": True,
-            "timezone": "auto",
+            "hourly": [
+                "temperature_2m",
+                "relative_humidity_2m",
+                "precipitation",
+                "rain",
+                "windspeed_10m",
+                "soil_moisture_0_1cm"
+            ],
+            "daily": [
+                "temperature_2m_max",
+                "temperature_2m_min",
+                "precipitation_sum"
+            ],
+            "timezone": "auto"
         }
         response = requests.get(OPEN_METEO_URL, params=params, timeout=10)
         if response.status_code == 200:
             data = response.json()
+            result = {}
+
+            # Current weather
             if "current_weather" in data:
-                return data["current_weather"]
+                result["current"] = data["current_weather"]
+
+            # Recent hourly trends (last 24h)
+            if "hourly" in data:
+                result["recent"] = {
+                    "temperature": data["hourly"]["temperature_2m"][-24:],
+                    "humidity": data["hourly"]["relative_humidity_2m"][-24:],
+                    "rainfall": data["hourly"]["rain"][-24:],
+                    "windspeed": data["hourly"]["windspeed_10m"][-24:]
+                }
+
+            # Daily aggregates
+            if "daily" in data:
+                result["daily"] = data["daily"]
+
+            return result
         return {"error": "Weather data not available"}
     except Exception as e:
         return {"error": str(e)}
 
+
+
 def fetch_weather_for_location(location_name: str) -> Dict[str, Any]:
-    """Main helper: takes a location name and returns weather info object."""
+    """Main helper: takes a location name and returns detailed weather info object."""
     lat, lon = get_coordinates(location_name)
     if not lat or not lon:
         return {"error": "Unable to find location"}

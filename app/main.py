@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from typing import Optional
-
+from app.crop_advisory import generate_advisory
 from app.nlp_engine import process_query
 from app.user_location import set_user_location, get_user_location
 from app.location_weather import fetch_weather_for_location
@@ -66,6 +66,26 @@ def get_weather_for_user(user_id: str):
     weather_info = fetch_weather_for_location(stored["location_name"] or "")
     return {"user_id": user_id, "location": stored, "weather": weather_info}
 
+@app.get("/advisory")
+def get_crop_advisory(user_id: str, crop: str):
+    stored = get_user_location(user_id)
+    if not stored:
+        return {"error": "Location not set for this user_id"}
+
+    # fetch weather for user’s location
+    weather_info = fetch_weather_for_location(stored["location_name"] or "")
+    if "error" in weather_info.get("weather", {}):
+        return {"error": "Weather unavailable for advisory"}
+
+    advisory = generate_advisory(crop, weather_info["weather"])
+
+    return {
+        "user_id": user_id,
+        "crop": crop,
+        "location": stored,
+        "weather": weather_info["weather"],
+        "advisory": advisory
+    }
 @app.post("/set-polygon")
 def set_user_polygon(req: PolygonRequest):
     """
@@ -83,6 +103,31 @@ def chat_endpoint(request: ChatRequest):
     Main chatbot endpoint: handles weather, fertilizer, and general queries.
     """
     query = request.query.lower()
+
+    # ✅ Advisory intent
+    if any(word in query for word in ["advisory", "crop advisory", "krishi salah", "pest", "disease"]):
+        if not (request.crop and request.user_id):
+            return {
+                "error": "Advisory requires user_id and crop name.",
+                "example": {
+                    "query": "Give advisory for wheat",
+                    "crop": "wheat",
+                    "user_id": "farmer_123"
+                }
+            }
+
+        stored = get_user_location(request.user_id)
+        if not stored:
+            return {"error": "Location not set for this user_id"}
+
+        weather_info = fetch_weather_for_location(stored["location_name"] or "")
+        advisory = generate_advisory(request.crop, weather_info["weather"])
+
+        return {
+            "intent": "crop_advisory",
+            "query": request.query,
+            "response": advisory
+        }
 
     # ✅ Fertilizer intent detection
     if any(word in query for word in ["fertilizer", "fertilisers", "khad", "urvarak"]):
