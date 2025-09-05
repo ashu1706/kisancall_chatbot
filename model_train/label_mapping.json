@@ -1,0 +1,9 @@
+{
+  "fertilizer_management": 0,
+  "government_scheme": 1,
+  "market_info": 2,
+  "other": 3,
+  "pest_disease_issue": 4,
+  "seed_recommendation": 5,
+  "weather_advisory": 6
+}
