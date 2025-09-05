@@ -17,23 +17,24 @@ def infer_intent(row) -> str:
     cat = (row.get("Category") or "") + " " + (row.get("QueryType") or "")
     text = f"{cat} {q}".lower()
 
+    # Order matters: check most specific → general
+    if any(k in text for k in ["scheme", "yojana", "pm-kisan", "kcc", "credit card", "subsidy", "যোজনা"]):
+        return "government_scheme"
+
+    if any(k in text for k in ["market", "mandi", "price", "msp", "দাম", "भाव"]):
+        return "market_info"
+
+    if any(k in text for k in ["weather", "rain", "temperature", "humidity", "आবহাওয়া", "मौसम"]):
+        return "weather_advisory"
+
     if any(k in text for k in ["seed", "বীজ", "बीज", "seed rate", "variety", "hybrid"]):
         return "seed_recommendation"
 
     if any(k in text for k in ["fertilizer", "fertiliser", "npk", "urea", "खाद", "সার"]):
         return "fertilizer_management"
 
-    if any(k in text for k in ["pest", "disease", "insect", "blast", "blight", "रोग", "পোকা", "রোগ"]):
+    if any(k in text for k in ["pest", "disease", "insect", "blast", "blight", "रोग", "পোকা", "রोग"]):
         return "pest_disease_issue"
-
-    if any(k in text for k in ["weather", "rain", "temperature", "humidity", "আবহাওয়া", "मौसम"]):
-        return "weather_advisory"
-
-    if any(k in text for k in ["scheme", "yojana", "pm-kisan", "kcc", "credit card", "subsidy", "যোজনা"]):
-        return "government_scheme"
-
-    if any(k in text for k in ["market", "mandi", "price", "msP", "দাম", "भाव"]):
-        return "market_info"
 
     return "other"
 
