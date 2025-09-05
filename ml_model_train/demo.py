@@ -11,18 +11,18 @@ def get_example_data(location, crop, growth_stage):
     Simulates fetching real-time and soil data for a specific scenario.
     In a real app, this would come from APIs and databases.
     """
-    if location == "Punjab" and crop == "Wheat":
+    if location == "Delhi" and crop == "coffee":
         # Example data for wheat in Punjab (based on your dataset)
         return {
             'weather_data': {
-                'daily': {'temperature_2m_max': [25.5], 'temperature_2m_min': [12.1], 'precipitation_sum': [0]},
-                'hourly': {'relative_humidity_2m': [45.0]},
+                'daily': {'temperature_2m_max': [30.5], 'temperature_2m_min': [10.1], 'precipitation_sum': [0]},
+                'hourly': {'relative_humidity_2m': [55.0]},
                 'recent': {'rainfall': [0] * 24}
             },
             'soil_data': {
                 'Soil_pH': 7.2,
                 'Soil_Nitrogen_kg_ha': 150.5,
-                'Soil_Phosphorus_kg_ha': 45.3,
+                'Soil_Phosphorus_kg_ha': 47.3,
                 'Soil_Potassium_kg_ha': 280.1,
                 'NPK_Ratio': 0.5,
                 'Organic_Carbon_%': 1.5
@@ -152,4 +152,4 @@ def run_demonstration(location, crop, growth_stage):
 
 
 if __name__ == '__main__':
-    run_demonstration("Punjab", "Wheat", "Tillering")
+    run_demonstration("Delhi", "coffee", "Seeding")
