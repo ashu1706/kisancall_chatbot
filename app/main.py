@@ -18,6 +18,7 @@ from app.advisory_utils import (
     prepare_fertilizer_input,
     prepare_pest_input
 )
+from app.intent import predict_intent
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -190,70 +191,63 @@ def set_user_polygon(req: PolygonRequest):
     polygon_id = set_polygon(req.user_id, req.polygon_id)
     return {"message": "Polygon linked successfully", "user_id": req.user_id, "polygon_id": polygon_id}
 
-
-# ----------------- Enhanced Chat Endpoint with PostgreSQL -----------------
+# ----------------- Core Chat Endpoint -----------------
 @app.post("/chat", response_model=ChatResponse)
 async def enhanced_chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks):
-    """Enhanced chat endpoint with PostgreSQL agricultural chatbot, weather context, and confidence scoring"""
-
-    # Check if chatbot is initialized
     if not chatbot_initialized:
         if initialization_error:
             logger.warning(f"Chatbot not initialized due to error: {initialization_error}")
         return await fallback_chat_endpoint(request)
 
-    # Get chatbot instance
     chatbot = await get_chatbot()
 
-    # Get user location and weather context
     location_context = None
     weather_context = None
+    if request.lat and request.lon:
+        location_context = {"lat": request.lat, "lon": request.lon}
+        weather_info = get_weather(request.lat, request.lon)
+        if weather_info:
+            weather_context = weather_info
 
-    if request.user_id:
+    elif request.user_id:
         stored_location = get_user_location(request.user_id)
         if stored_location:
             location_context = stored_location
-            weather_info = fetch_weather_for_location(stored_location["location_name"] or "")
-            weather_context = weather_info.get("weather", {})
+            if stored_location.get("lat") and stored_location.get("lon"):
+                weather_info = get_weather(stored_location["lat"], stored_location["lon"])
+                if weather_info:
+                    weather_context = weather_info
+            elif stored_location.get("location_name"):
+                weather_info = fetch_weather_for_location(stored_location["location_name"])
+                if weather_info:
+                    weather_context = weather_info.get("weather", {})
 
-    # ------------------ Core ML Advisory Logic ------------------
     advisory_data = None
     if request.crop and weather_context and "current" in weather_context:
-        if any(word in request.query.lower() for word in
-               ["advisory", "recommendation", "advice", "fertilizer", "what to do"]):
-            # 🔹 Build user context here
+        if any(word in request.query.lower() for word in ["advisory", "recommendation", "advice", "fertilizer", "what to do"]):
             user_context = {
                 "crop": request.crop,
                 "location_name": location_context.get("location_name", "Unknown") if location_context else "Unknown",
-                "sowing_season": "Rabi",  # can be dynamic later
-                "soil_type": "Loamy",  # placeholder, replace with real DB/ML
-                "growth_stage": "Vegetative"  # can be tracked per user
+                "sowing_season": "Rabi",
+                "soil_type": "Loamy",
+                "growth_stage": "Vegetative"
             }
-            print("Weather context:", weather_context)
-            print("Crop:", request.crop)
-
-            # 🔹 Call ML advisory models with weather + user context
             advisory_data = get_advisory_from_models(request.crop, weather_context, user_context)
-    # -----------------------------------------------------------
 
     try:
-        # Enhanced query processing with context
         enhanced_query = request.query
         context_info = {}
 
         if request.crop:
             context_info['crop'] = request.crop
             enhanced_query += f" (crop: {request.crop})"
-
         if location_context:
             context_info['location'] = location_context['location_name']
             enhanced_query += f" (location: {location_context['location_name']})"
-
         if weather_context and "current" in weather_context:
             current_weather = weather_context["current"]
             context_info['weather'] = f"Temperature: {current_weather.get('temperature', 'N/A')}°C"
 
-        # Process query with agricultural chatbot
         result = await chatbot.process_query(enhanced_query, {
             "crop": request.crop,
             "location": location_context,
@@ -261,20 +255,13 @@ async def enhanced_chat_endpoint(request: ChatRequest, background_tasks: Backgro
             "advisory_data": advisory_data
         })
 
-        # Enhance response with weather context if relevant
         enhanced_response = result['response']
         if weather_context and any(word in request.query.lower() for word in ["weather", "rain", "temperature"]):
             enhanced_response = enhance_response_with_weather(enhanced_response, weather_context)
 
-        # Get intent classification (existing system)
-        intent = None
-        try:
-            from app.intent_classifier import predict_intent
-            intent, _ = predict_intent(request.query)
-        except:
-            intent = "agricultural_query"
+        # ✅ Use your XLM intent model
+        intent, _ = predict_intent(request.query)
 
-        # Prepare suggestions based on confidence
         suggestions = result.get("suggestions", [])
         if result["confidence"] < 0.75:
             if request.crop:
@@ -283,7 +270,6 @@ async def enhanced_chat_endpoint(request: ChatRequest, background_tasks: Backgro
                 suggestions.append("Share your location for weather-specific advice")
             suggestions.append("Upload images for visual diagnosis")
 
-        # Log query analytics in background
         background_tasks.add_task(
             log_query_analytics,
             request.user_id,
@@ -304,7 +290,7 @@ async def enhanced_chat_endpoint(request: ChatRequest, background_tasks: Backgro
             suggestions=suggestions,
             weather_context=weather_context,
             location_context=location_context,
-            advisory=advisory_data,  # 🔹 Now advisory from ML models gets returned
+            advisory=advisory_data,
             metadata={
                 "context_info": context_info,
                 "processing_time": result["processing_time"],
@@ -318,62 +304,29 @@ async def enhanced_chat_endpoint(request: ChatRequest, background_tasks: Backgro
         return await fallback_chat_endpoint(request)
 
 
-async def log_query_analytics(user_id: str, query: str, query_type: str, confidence: float,
-                              source: str, processing_time: float, context_info: dict):
-    """Log query analytics to database"""
-    try:
-        insert_query = """
-        INSERT INTO query_analytics 
-        (user_id, query, query_type, confidence_score, response_source, processing_time_ms, 
-         location_context, crops_mentioned, weather_context)
-        VALUES (:user_id, :query, :query_type, :confidence_score, :response_source, 
-                :processing_time_ms, :location_context, :crops_mentioned, :weather_context)
-        """
-
-        values = {
-            "user_id": user_id,
-            "query": query[:1000],  # Limit length
-            "query_type": query_type,
-            "confidence_score": confidence,
-            "response_source": source,
-            "processing_time_ms": int(processing_time * 1000),
-            "location_context": context_info.get('location', ''),
-            "crops_mentioned": context_info.get('crop', ''),
-            "weather_context": str(context_info.get('weather', ''))[:500]
-        }
-
-        await database.execute(insert_query, values)
-    except Exception as e:
-        logger.error(f"Analytics logging error: {e}")
-
-
+# ----------------- Fallback Endpoint -----------------
 async def fallback_chat_endpoint(request: ChatRequest) -> ChatResponse:
-    """Fallback to original intent-based chat system"""
-
     try:
-        from app.intent_classifier import predict_intent
         intent, confidence = predict_intent(request.query)
     except:
         intent, confidence = "general_query", 0.5
 
-    # Enhanced intent-response mapping
     replies = {
-        "fertilizer_management": f"For {request.crop or 'your crop'}, use NPK fertilizers in recommended ratios. Consider soil testing for precise recommendations. Would you like specific fertilizer suggestions?",
-        "seed_recommendation": f"Use certified seeds for {request.crop or 'your crop'}. High-yielding varieties are available. Share your region for variety-specific suggestions.",
-        "pest_disease_issue": "Please upload clear images of affected plant parts. I can help identify the issue and suggest treatment options.",
-        "weather_advisory": "Checking weather conditions for your location. Monitor rainfall and temperature for optimal farming decisions.",
-        "government_scheme": "Available schemes: PM-Kisan (₹6000/year), Crop Insurance, KCC loans. Check eligibility and apply through nearest CSC or bank.",
-        "market_info": f"Fetching current market prices for {request.crop or 'crops'}. Consider local mandi rates and transportation costs for better decisions."
+        "fertilizer_management": f"For {request.crop or 'your crop'}, use NPK fertilizers in recommended ratios.",
+        "seed_recommendation": f"Use certified seeds for {request.crop or 'your crop'}.",
+        "pest_disease_issue": "Please upload images of affected plants for diagnosis.",
+        "weather_advisory": "Checking weather conditions for your location.",
+        "government_scheme": "Schemes: PM-Kisan, Crop Insurance, KCC loans.",
+        "market_info": f"Fetching current market prices for {request.crop or 'crops'}."
     }
 
-    reply = replies.get(intent,
-                        "I'm here to help with farming questions. Could you ask about crops, weather, pests, fertilizers, or government schemes?")
+    reply = replies.get(intent, "I'm here to help with farming questions. Ask about crops, weather, pests, fertilizers, or schemes.")
 
     return ChatResponse(
         query=request.query,
         response=reply,
         confidence=confidence,
-        source="intent_classifier",
+        source="xlm_intent_model",
         intent=intent,
         suggestions=["Be more specific about your farming issue", "Upload images for better diagnosis"],
         weather_context=None,
@@ -382,32 +335,25 @@ async def fallback_chat_endpoint(request: ChatRequest) -> ChatResponse:
     )
 
 
+# ----------------- Helper -----------------
 def enhance_response_with_weather(response: str, weather_context: Dict) -> str:
-    """Enhance response with relevant weather information"""
-
     if not weather_context or 'current' not in weather_context:
         return response
 
     current = weather_context['current']
     weather_summary = []
-
     if 'temperature' in current:
         weather_summary.append(f"Current temperature: {current['temperature']}°C")
-
     if 'windspeed' in current:
         weather_summary.append(f"Wind: {current['windspeed']} km/h")
-
     if weather_context.get('recent', {}).get('rainfall'):
-        recent_rain = sum(weather_context['recent']['rainfall'][-24:])  # Last 24h
+        recent_rain = sum(weather_context['recent']['rainfall'][-24:])
         if recent_rain > 0:
             weather_summary.append(f"Recent rainfall: {recent_rain:.1f}mm")
 
     if weather_summary:
-        weather_info = " | ".join(weather_summary)
-        return f"{response}\n\n🌤️ **Weather Context**: {weather_info}"
-
+        return f"{response}\n\n🌤️ **Weather Context**: {' | '.join(weather_summary)}"
     return response
-
 
 # ----------------- PostgreSQL Agricultural Endpoints -----------------
 @app.get("/chatbot/health")
